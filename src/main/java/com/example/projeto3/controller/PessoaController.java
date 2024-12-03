@@ -1,12 +1,18 @@
 package com.example.projeto3.controller;
 
+import com.example.projeto3.DTO.AtividadeNomeDTO;
+import com.example.projeto3.DTO.EnderecoDTO;
+import com.example.projeto3.DTO.PessoaDTO;
 import com.example.projeto3.model.Endereco;
 import com.example.projeto3.model.Pessoa;
 import com.example.projeto3.repository.PessoaRepository;
+import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/pessoas")
@@ -15,58 +21,119 @@ public class PessoaController {
     @Autowired
     private PessoaRepository pessoaRepository;
 
-    // Obter todas as pessoas
+    @Autowired
+    private ModelMapper modelMapper;
+
     @GetMapping
-    public List<Pessoa> getAllPessoas() {
-        return pessoaRepository.findAll();
+    @Transactional(readOnly = true)
+    public List<PessoaDTO> getAllPessoas() {
+        List<Pessoa> pessoas = pessoaRepository.findAll();
+        return pessoas.stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
     }
 
-    // Obter uma pessoa por ID
     @GetMapping("/{id}")
-    public ResponseEntity<Pessoa> getPessoaById(@PathVariable Long id) {
+    @Transactional(readOnly = true)
+    public ResponseEntity<PessoaDTO> getPessoaById(@PathVariable Long id) {
         return pessoaRepository.findById(id)
-                .map(pessoa -> ResponseEntity.ok().body(pessoa))
+                .map(pessoa -> ResponseEntity.ok().body(convertToDto(pessoa)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    // Criar uma nova pessoa com endereços
     @PostMapping
-    public Pessoa createPessoa(@RequestBody Pessoa pessoa) {
+    public PessoaDTO createPessoa(@RequestBody PessoaDTO pessoaDTO) {
+        Pessoa pessoa = convertPessoaDTOToEntity(pessoaDTO);
+
         if (pessoa.getEnderecos() != null) {
             pessoa.getEnderecos().forEach(endereco -> endereco.setPessoa(pessoa));
         }
-        return pessoaRepository.save(pessoa);
+
+        Pessoa pessoaSalva = pessoaRepository.save(pessoa);
+        return convertToDto(pessoaSalva);
     }
 
-    // Atualizar uma pessoa existente
     @PutMapping("/{id}")
-    public ResponseEntity<Pessoa> updatePessoa(@PathVariable Long id, @RequestBody Pessoa detalhesPessoa) {
+    @Transactional
+    public ResponseEntity<PessoaDTO> updatePessoa(@PathVariable Long id, @RequestBody PessoaDTO pessoaDTO) {
         return pessoaRepository.findById(id)
-                .map(pessoa -> {
-                    pessoa.setNome(detalhesPessoa.getNome());
-                    pessoa.setEmail(detalhesPessoa.getEmail());
+                .map(pessoaExistente -> {
+                    pessoaExistente.setNome(pessoaDTO.getNome());
+                    pessoaExistente.setEmail(pessoaDTO.getEmail());
 
                     // Atualizar endereços
-                    pessoa.getEnderecos().clear();
-                    if (detalhesPessoa.getEnderecos() != null) {
-                        detalhesPessoa.getEnderecos().forEach(endereco -> {
-                            endereco.setPessoa(pessoa);
-                            pessoa.getEnderecos().add(endereco);
-                        });
+                    pessoaExistente.getEnderecos().clear();
+                    if (pessoaDTO.getEnderecos() != null) {
+                        List<Endereco> enderecosAtualizados = pessoaDTO.getEnderecos().stream()
+                                .map(this::convertEnderecoDTOToEntity)
+                                .collect(Collectors.toList());
+                        enderecosAtualizados.forEach(endereco -> endereco.setPessoa(pessoaExistente));
+                        pessoaExistente.getEnderecos().addAll(enderecosAtualizados);
                     }
 
-                    Pessoa pessoaAtualizada = pessoaRepository.save(pessoa);
-                    return ResponseEntity.ok().body(pessoaAtualizada);
+                    Pessoa pessoaAtualizada = pessoaRepository.save(pessoaExistente);
+                    return ResponseEntity.ok().body(convertToDto(pessoaAtualizada));
                 }).orElse(ResponseEntity.notFound().build());
     }
 
-    // Deletar uma pessoa
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<?> deletePessoa(@PathVariable Long id) {
         return pessoaRepository.findById(id)
                 .map(pessoa -> {
                     pessoaRepository.delete(pessoa);
                     return ResponseEntity.ok().build();
                 }).orElse(ResponseEntity.notFound().build());
+    }
+
+    private PessoaDTO convertToDto(Pessoa pessoa) {
+        PessoaDTO pessoaDTO = new PessoaDTO();
+        pessoaDTO.setId(pessoa.getId());
+        pessoaDTO.setNome(pessoa.getNome());
+        pessoaDTO.setEmail(pessoa.getEmail());
+
+        if (pessoa.getEnderecos() != null) {
+            List<EnderecoDTO> enderecosDTO = pessoa.getEnderecos().stream()
+                    .map(this::convertToDto)
+                    .collect(Collectors.toList());
+            pessoaDTO.setEnderecos(enderecosDTO);
+        }
+
+        if (pessoa.getAtividades() != null) {
+            List<AtividadeNomeDTO> atividadesNomeDTO = pessoa.getAtividades().stream()
+                    .map(atividade -> {
+                        AtividadeNomeDTO dto = new AtividadeNomeDTO();
+                        dto.setAtividade(atividade.getAtividade());
+                        return dto;
+                    })
+                    .collect(Collectors.toList());
+            pessoaDTO.setAtividades(atividadesNomeDTO);
+        }
+
+        return pessoaDTO;
+    }
+
+    private Pessoa convertPessoaDTOToEntity(PessoaDTO pessoaDTO) {
+        Pessoa pessoa = new Pessoa();
+        pessoa.setId(pessoaDTO.getId());
+        pessoa.setNome(pessoaDTO.getNome());
+        pessoa.setEmail(pessoaDTO.getEmail());
+
+        if (pessoaDTO.getEnderecos() != null) {
+            List<Endereco> enderecos = pessoaDTO.getEnderecos().stream()
+                    .map(this::convertEnderecoDTOToEntity)
+                    .collect(Collectors.toList());
+            pessoa.setEnderecos(enderecos);
+        }
+
+        return pessoa;
+    }
+
+    private EnderecoDTO convertToDto(Endereco endereco) {
+        return modelMapper.map(endereco, EnderecoDTO.class);
+    }
+
+    private Endereco convertEnderecoDTOToEntity(EnderecoDTO enderecoDTO) {
+        return modelMapper.map(enderecoDTO, Endereco.class);
     }
 }
