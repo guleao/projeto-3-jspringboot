@@ -1,8 +1,8 @@
 package com.example.projeto3.model;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.*;
-
 import java.time.LocalDate;
 
 @Entity
@@ -16,12 +16,13 @@ public class Atividade {
 
     private String atividade;
 
-    @ManyToOne
-    @JoinColumn(name = "pessoa_id")
-    private Pessoa pessoa;
-
     private LocalDate dataExpiracao;
 
     @Enumerated(EnumType.STRING)
     private Situacao situacao;
+
+    @ManyToOne
+    @JoinColumn(name = "pessoa_id")
+    @JsonBackReference
+    private Pessoa pessoa;
 }
